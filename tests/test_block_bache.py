@@ -50,7 +50,20 @@ class TestBlock:
         # Ensure decrementing below zero raises an assertion error
         with pytest.raises(AssertionError):
             block.ref_dec()
-
+            
+    def test_reset_block_id(self, block):
+        def __check_block_valid(block):
+            assert block.ref_count == 0
+            assert not block.is_dirty
+            assert not block.is_uptodate
+        block.set_blk_id(2)
+        __check_block_valid(block)
+        block.ref_inc()
+        assert block.ref_count == 1
+        block.set_blk_id(2)
+        __check_block_valid(block)
+        block.set_blk_id(3)
+        __check_block_valid(block)
 
 @pytest.fixture
 def block_cache() -> BlockCache:
