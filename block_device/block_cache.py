@@ -206,7 +206,7 @@ class BlockCache(object):
         Returns:
             A boolean value: True if the cache is full and cannot store more blocks, False otherwise.
         """
-        return self.__blk_limit <= self.count
+        return self.__blk_limit <= self.count and self.__is_lru_empty()
     
     def find_get_block(self, blk_id: int) -> Optional['Block']:
         """
@@ -266,9 +266,9 @@ class BlockCache(object):
         assert blk_id >= 0
         
         if self.is_full:
-            if self.__is_lru_empty():
-                return None
-                
+            return None
+        
+        if not self.__is_lru_empty():                
             popped_blk_id = self.__pop_lru()
             if popped_blk_id == blk_id:
                 block = self.__get_block(popped_blk_id)
