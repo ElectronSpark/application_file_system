@@ -1,4 +1,5 @@
 from typing import Optional
+import traceback
 
 
 class Block(object):
@@ -107,10 +108,17 @@ class Block(object):
         
     def set_blk_id(self, new_blk_id):
         """
-        change block id
+        change block id. This method will also reset the block's dirty bit and
+        uptodate bit.
         """
         assert new_blk_id >= 0
+        if self.__ref_cnt != 0:
+            print("warning: changing a block id of a cach block whos ref_count {} != 0".format(self.__ref_cnt))
+        if self.is_dirty:
+            print("warning: changing a block id of a dirty block")
         self.__blk_id = new_blk_id
+        self.clear_dirty()
+        self.clear_uptodate()
 
     @property
     def ref_count(self) -> int:
@@ -212,10 +220,11 @@ class BlockCache(object):
         Returns:
             An instance of Block if found; otherwise, None.
         """
-        block = self.__cache.get(blk_id, None)
+        block = self.__get_block(blk_id)
         if block is not None:
             if block.ref_count == 0:
-                self.__lru_queue.remove(block.blk_id)
+                assert self.__is_in_lru(blk_id)
+                self.__remove_lru_blk_id(block.blk_id)
             block.ref_inc()
         return block
 
@@ -229,30 +238,18 @@ class BlockCache(object):
             blk: The block to modify.
         """
         assert isinstance(blk, Block)
-        assert blk.blk_cache is self, "The block belongs to another block cache."
-        assert self.__cache.get(blk.blk_id, None) is blk
+        assert self.__contains_block(blk)
         
         blk.ref_dec()
         if blk.ref_count == 0:
-            self.__lru_queue.append(blk.blk_id)
-    
-    def least_used_block(self) -> Optional['Block']:
-        """
-        Retrieves the least used block from the LRU list.
-
-        Returns the block at the tail of the LRU list, indicating it is the least recently used.
-
-        Returns:
-            The least recently used block if available; otherwise, None.
-        """
-        if len(self.__lru_queue) == 0:
-            return None
-        blk_id = self.__lru_queue.pop(0)
-        block = self.__cache.get(blk_id, None)
-        assert block is not None    # A block in lru list must also be in cache
-        assert block.ref_count == 0, "find a block in lru who's reference count is not 0."
-        block.ref_inc()
-        return block
+            if blk.is_uptodate:
+                # When the block is up to date, put it into lru list for
+                # possible future use.
+                self.__push_lru(blk.blk_id)
+            else:
+                # When the block is not up to date, just release it.
+                popped_block = self.__pop_block(blk.blk_id)
+                assert popped_block is blk
     
     def alloc_block(self, blk_id: int) -> Optional['Block']:
         """
@@ -268,43 +265,100 @@ class BlockCache(object):
         assert blk_id >= 0
         
         if self.is_full:
-            block = self.least_used_block()
-            if block is None or block.blk_id == blk_id:
-                return block
-            # need to reinsert the block with a new block id.
-            block1 = self.__cache.pop(blk_id, None)
-            assert block1 is block
-            self.__cache[blk_id] = block1
-            return block1
+            if self.__is_lru_empty():
+                return None
+                
+            popped_blk_id = self.__pop_lru()
+            if popped_blk_id == blk_id:
+                block = self.__get_block(popped_blk_id)
+                assert isinstance(block, Block)
+            else:
+                # need to reinsert the block with a new block id.
+                block = self.__pop_block(popped_blk_id)
+                assert isinstance(block, Block)
+                block.set_blk_id(blk_id)
+                self.__add_block(block)
+            block.ref_inc()
+            return block
         
-        if blk_id in self.__cache:
+        if not self.__get_block(blk_id) is None:
             # cannot create a block with a used block id.
             return None
         
         block = Block(self, blk_id, self.__blk_size)
         block.ref_inc()
-        self.__cache[blk_id] = block
+        if not self.__add_block(block):
+            # Return None if failed to add the 
+            return None
+        return block
+        
+    def __contains_block(self, block: Block) -> bool:
+        """
+        To check if the given block belongs to this block cache.
+        """
+        if not block.blk_cache is self:
+            return False
+        # The following are thorough checks, may be descarded in the future.
+        return block.blk_id in self.__cache
+    
+    def __remove_lru_blk_id(self, blk_id: int):
+        """
+        Remove a block id from LRU list. No any validation check will be performed.
+        """
+        self.__lru_queue.remove(blk_id)
+        
+    def __is_in_lru(self, blk_id: int) -> bool:
+        """
+        Check if a block id is in LRU list.
+        """
+        return blk_id in self.__lru_queue
+    
+    def __push_lru(self, blk_id: int) -> bool:
+        """
+        Add a block id to LRU list. No any validation check will be performed.
+        """
+        self.__lru_queue.append(blk_id)
+        
+    def __is_lru_empty(self) -> bool:
+        """
+        Check if the LRU list is empty.
+        """
+        return len(self.__lru_queue) == 0
+    
+    def __pop_lru(self) -> Optional['int']:
+        """
+        Get and remove a block id at the end of LRU list. 
+        No any validation check will be performed.
+        """
+        return self.__lru_queue.pop()
+    
+    def __add_block(self, block: 'Block') -> bool:
+        """
+        Add a block to the block cache. Return True if succeed.
+        """
+        if not block.blk_cache is self:
+            return False
+        if block.blk_id in self.__cache:
+            return False
+        self.__cache[block.blk_id] = block
+        return True
+    
+    def __get_block(self, blk_id: int) -> Optional['Block']:
+        """
+        Find a block with given block id from the cache. Return None if not found.
+        """
+        block = self.__cache.get(blk_id, None)
+        if not block is None:
+            assert block.blk_id == blk_id, "Find a block with a inconsistent blk_id"
         return block
     
-    def drop_block(self, blk: 'Block') -> bool:
+    def __pop_block(self, blk_id: int) -> Optional['Block']:
         """
-        Removes a specified block from the cache.
-        
-        @TODO: this method should be a non-user method
-
-        Args:
-            blk: The block to remove.
-
-        Returns:
-            True if the block was successfully removed; False otherwise.
+        Find and drop a block with given block id from the cache.
+        Return None if not found.
         """
-        assert isinstance(blk, Block)
-        assert blk.blk_cache is self, "The block belongs to another block cache."
-        
-        blk_id = blk.blk_id
         block = self.__cache.pop(blk_id, None)
-        if block is None:
-            return False
-
-        return True
-        
+        if not block is None:
+            assert block.blk_id == blk_id, "Find a block with a inconsistent blk_id"
+        return block
+    
