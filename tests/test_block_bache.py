@@ -111,6 +111,52 @@ class TestBlockCache:
         assert block_ref.ref_count == 1
         block_cache.put_block(block)
         assert block.ref_count == 0
+        
+    def test_lru(self, block_cache: BlockCache):
+        # Populate cache with some blocks and simulate usage
+        allocated_blocks = []
+        for blk_id in range(1, 6):
+            block = block_cache.alloc_block(blk_id)
+            block.set_uptodate()
+            assert isinstance(block, Block)
+            allocated_blocks.append(block)
+            if blk_id == 4:
+                assert not block_cache.is_full
+        assert block_cache.is_full
+        
+        block_cache.put_block(allocated_blocks[1])
+        assert allocated_blocks[1].ref_count == 0
+        assert block_cache.lru_count == 1
+        assert not block_cache.is_full
+        block_cache.put_block(allocated_blocks[3])
+        assert allocated_blocks[3].ref_count == 0
+        assert block_cache.lru_count == 2
+        assert not block_cache.is_full
+        block_cache.put_block(allocated_blocks[4])
+        assert allocated_blocks[4].ref_count == 0
+        assert block_cache.lru_count == 3
+        assert not block_cache.is_full
+        
+        block = block_cache.alloc_block(6)
+        assert block_cache.lru_count == 2
+        assert block.blk_id == 6
+        assert block.ref_count == 1
+        assert block is allocated_blocks[1]
+        assert not block_cache.is_full
+        
+        block = block_cache.alloc_block(7)
+        assert block_cache.lru_count == 1
+        assert block.blk_id == 7
+        assert block.ref_count == 1
+        assert block is allocated_blocks[3]
+        assert not block_cache.is_full
+        
+        block = block_cache.find_get_block(5)
+        assert block_cache.lru_count == 0
+        assert block.blk_id == 5
+        assert block.ref_count == 1
+        assert block is allocated_blocks[4]
+        assert block_cache.is_full
 
     @pytest.mark.skip
     def test_least_used_block(self, block_cache: BlockCache):
