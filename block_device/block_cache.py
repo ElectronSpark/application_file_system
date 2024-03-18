@@ -197,6 +197,15 @@ class BlockCache(object):
         return len(self.__cache)
     
     @property
+    def lru_count(self):
+        """The current number of blocks stored in the LRU list.
+        
+        Returns:
+            The number of blocks currently in the LRU list.
+        """
+        return len(self.__lru_queue)
+    
+    @property
     def is_full(self) -> bool:
         """Determines if the cache has reached its maximum capacity.
         
@@ -268,7 +277,7 @@ class BlockCache(object):
         if self.is_full:
             return None
         
-        if not self.__is_lru_empty():                
+        if not self.__is_lru_empty():
             popped_blk_id = self.__pop_lru()
             if popped_blk_id == blk_id:
                 block = self.__get_block(popped_blk_id)
@@ -278,7 +287,7 @@ class BlockCache(object):
                 block = self.__pop_block(popped_blk_id)
                 assert isinstance(block, Block)
                 block.set_blk_id(blk_id)
-                self.__add_block(block)
+                assert self.__add_block(block)
             block.ref_inc()
             return block
         
@@ -331,7 +340,7 @@ class BlockCache(object):
         Get and remove a block id at the end of LRU list. 
         No any validation check will be performed.
         """
-        return self.__lru_queue.pop()
+        return self.__lru_queue.pop(0)
     
     def __add_block(self, block: 'Block') -> bool:
         """
