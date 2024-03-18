@@ -117,6 +117,7 @@ class Block(object):
         if self.is_dirty:
             print("warning: changing a block id of a dirty block")
         self.__blk_id = new_blk_id
+        self.__ref_cnt = 0
         self.clear_dirty()
         self.clear_uptodate()
 
