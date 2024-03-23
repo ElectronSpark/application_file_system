@@ -106,16 +106,17 @@ class Block(object):
         """
         self.__uptodate = False
         
-    def set_blk_id(self, new_blk_id):
+    def move_blk_cache(self, new_cache, new_blk_id):
         """
-        change block id. This method will also reset the block's dirty bit and
-        uptodate bit.
+        change block id and the cache it belongs to. This method will also 
+        reset the block's dirty bit and uptodate bit.
         """
         assert new_blk_id >= 0
         if self.__ref_cnt != 0:
             print("warning: changing a block id of a cach block whos ref_count {} != 0".format(self.__ref_cnt))
         if self.is_dirty:
             print("warning: changing a block id of a dirty block")
+        self.__blk_cache = new_cache
         self.__blk_id = new_blk_id
         self.__ref_cnt = 0
         self.clear_dirty()
@@ -315,7 +316,7 @@ class BlockCache(object):
                 # need to reinsert the block with a new block id.
                 block = self.__pop_block(popped_blk_id)
                 assert isinstance(block, Block)
-                block.set_blk_id(blk_id)
+                block.move_blk_cache(self, blk_id)
                 assert self.__add_block(block)
             block.ref_inc()
             return block
