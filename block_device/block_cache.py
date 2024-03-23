@@ -237,12 +237,43 @@ class BlockCache(object):
         return self.__blk_limit <= self.count and self.__is_lru_empty()
     
     def get_dirty_block(self) -> Optional['Block']:
+        """@TODO: Get an inactive dirty block.
+        
+        Try to get a dirty Cache Block with 0 reference count. The Cache Block
+        returned will be removed from the dirtu queue.
+        
+        Returns:
+            A Cache Block instance if the dirty queue is not empty.
+            Otherwise None.
+        """
         pass
     
     def get_lru_block(self) -> Optional['Block']:
+        """@TODO: Get an inactive block which has been written-back.
+        
+        Get a Cache Block from the tail of the LRU list, which is synchronized
+        and without any reference. The Cache Block returned will be removed 
+        from the LRU list.
+        
+        Returns:
+            A Cache Block instance if the LRU list is not empty.
+            Otherwise None.
+        """
         pass
     
     def drop_block(self, block: 'Block') -> bool:
+        """@TODO: Drop a block from the cache.
+
+        To drop a Block from the cache. This method will not delete the Block
+        instance. If the block is referenced more than once, This method will
+        do nothing and return False.
+
+        Args:
+            block : the block to drop from the cache.
+            
+        Returns:
+            Return True if success, otherwise False.
+        """
         pass
     
     def find_get_block(self, blk_id: int) -> Optional['Block']:
@@ -270,7 +301,11 @@ class BlockCache(object):
         """
         Decrements the reference count of a given block.
 
-        If the block's reference count reaches 0, it is moved to the LRU list.
+        If the block's reference count reaches 0, it is moved to the LRU list 
+        or the dirty list depending on the status of its dirty bit. Dirty block
+        without reference will be add to dirty list, synchronized block without
+        reference will be add to lru list.
+        
         @TODO: Dirty blocks should not be moved lru block. Dirty blocks without
             refetence should be moved to dirty list.
 
