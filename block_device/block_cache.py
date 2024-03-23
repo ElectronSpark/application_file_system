@@ -228,66 +228,71 @@ class BlockCache(object):
     def is_full(self) -> bool:
         """Determines if the cache has reached its maximum capacity.
         
-        Compares the current count of blocks in the cache against its maximum limit to determine if
-        the cache can no longer accommodate additional blocks.
+        Compares the current count of blocks in the cache against its maximum
+        limit to determine if the cache can no longer accommodate additional
+        blocks.
         
         Returns:
-            A boolean value: True if the cache is full and cannot store more blocks, False otherwise.
+            A boolean value: True if the cache is full and cannot store more
+            blocks, False otherwise.
         """
         return self.__blk_limit <= self.count and self.__is_lru_empty()
     
     def get_dirty_block(self) -> Optional['Block']:
         """@TODO: Get an inactive dirty block.
         
-        Try to get a dirty Cache Block with 0 reference count. The Cache Block
-        returned will be removed from the dirtu queue.
+        Attempts to retrieve a dirty cache block with a reference count of 0
+        from the dirty queue. The cache block returned will be removed from the
+        dirty queue.
         
         Returns:
-            A Cache Block instance if the dirty queue is not empty.
-            Otherwise None.
+            Optional[Block]: A cache block instance if available in the dirty
+            queue; otherwise, None.
         """
         pass
-    
+
     def get_lru_block(self) -> Optional['Block']:
-        """@TODO: Get an inactive block which has been written-back.
+        """@TODO: Get an inactive block that has been written back.
         
-        Get a Cache Block from the tail of the LRU list, which is synchronized
-        and without any reference. The Cache Block returned will be removed 
-        from the LRU list.
+        Retrieves a cache block from the tail of the LRU list, indicating it
+        has been synchronized with the storage medium and holds no active
+        references. The cache block returned will be removed from the LRU list.
         
         Returns:
-            A Cache Block instance if the LRU list is not empty.
-            Otherwise None.
+            Optional[Block]: A cache block instance if the LRU list is not
+            empty; otherwise, None.
         """
         pass
-    
+
     def drop_block(self, block: 'Block') -> bool:
         """@TODO: Drop a block from the cache.
-
-        To drop a Block from the cache. This method will not delete the Block
-        instance. If the block is referenced more than once, This method will
-        do nothing and return False.
-
+        
+        Attempts to remove a block from the cache. This method does not delete
+        the block instance itself. If the block is currently referenced
+        (reference count > 1), the method will not proceed and will return
+        False.
+        
         Args:
-            block : the block to drop from the cache.
+            block: The block to be removed from the cache.
             
         Returns:
-            Return True if success, otherwise False.
+            bool: True if the block was successfully removed; False otherwise.
         """
         pass
     
     def find_get_block(self, blk_id: int) -> Optional['Block']:
-        """
-        Attempts to find and return a block by its ID from the cache or the LRU list.
-
-        If found, the block's reference count is incremented. Blocks not found in the cache return None.
-        Users should decrement the block's reference count by calling "put_block" after usage.
-
+        """Attempts to find and return a block by its ID from the cache or the
+        LRU list.
+        
+        If found, the block's reference count is incremented. Blocks not found
+        in the cache or LRU list return None. Users should decrement the
+        block's reference count by calling "put_block" after usage.
+        
         Args:
             blk_id: The ID of the block to retrieve.
-
+        
         Returns:
-            An instance of Block if found; otherwise, None.
+            Optional[Block]: An instance of the Block if found; otherwise, None.
         """
         block = self.__get_block(blk_id)
         if block is not None:
@@ -300,15 +305,15 @@ class BlockCache(object):
     def put_block(self, blk: 'Block'):
         """
         Decrements the reference count of a given block.
-
-        If the block's reference count reaches 0, it is moved to the LRU list 
-        or the dirty list depending on the status of its dirty bit. Dirty block
-        without reference will be add to dirty list, synchronized block without
-        reference will be add to lru list.
         
-        @TODO: Dirty blocks should not be moved lru block. Dirty blocks without
-            refetence should be moved to dirty list.
-
+        If the block's reference count reaches 0, its subsequent handling
+        depends on its dirty bit status. Dirty blocks without references are
+        added to the dirty list, whereas synchronized blocks without
+        references are added to the LRU list.
+        
+        @TODO: Ensure dirty blocks are not moved to the LRU list. Dirty blocks
+            without references should be moved to the dirty list.
+        
         Args:
             blk: The block to modify.
         """
@@ -318,17 +323,18 @@ class BlockCache(object):
         blk.ref_dec()
         if blk.ref_count == 0:
             if blk.is_uptodate:
-                # When the block is up to date, put it into lru list for
-                # possible future use.
+                # When the block is up to date, it is added to the LRU list for 
+                # potential future use.
                 self.__push_lru(blk.blk_id)
             else:
-                # When the block is not up to date, just release it.
+                # Release blocks that are not up to date.
                 popped_block = self.__pop_block(blk.blk_id)
                 assert popped_block is blk
     
     def alloc_block(self, blk_id: int) -> Optional['Block']:
         """
-        Allocates and inserts a new block into the cache if there is space available or if an old block can be evicted.
+        Allocates and inserts a new block into the cache if there is space 
+        available or if an old block can be evicted.
 
         Args:
             blk_id: The ID for the new block.
