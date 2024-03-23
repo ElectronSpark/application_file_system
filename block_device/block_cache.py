@@ -235,7 +235,13 @@ class BlockCache(object):
         """
         return self.__blk_limit <= self.count and self.__is_lru_empty()
     
-    def get_dirty_block(self):
+    def get_dirty_block(self) -> Optional['Block']:
+        pass
+    
+    def get_lru_block(self) -> Optional['Block']:
+        pass
+    
+    def drop_block(self, block: 'Block') -> bool:
         pass
     
     def find_get_block(self, blk_id: int) -> Optional['Block']:
