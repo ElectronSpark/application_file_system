@@ -163,7 +163,8 @@ class BlockCache(object):
         assert blk_size > 0, "block size must be greater than 0"
         assert blk_limit > 0, "block limit must be greater than 0"
         
-        self.__cache = {}  # Block ID mapped to Block instance for O(1) access.
+        self.__cache = {}  # Block ID mapped to Block instance.
+        self.__dirty_queue = {} # Block ID mapped to dirty Block.
         self.__lru_queue = []  # List of Block IDs to manage LRU.
         self.__blk_size = blk_size
         self.__blk_limit = blk_limit
@@ -194,16 +195,33 @@ class BlockCache(object):
             The total number of blocks currently in the cache. This is not the total size of the cache, but rather
             the count of individual blocks it contains.
         """
-        return len(self.__cache)
+        return self.__cache_count()
     
     @property
     def lru_count(self):
-        """The current number of blocks stored in the LRU list.
+        """The current number of blocks in the LRU (Least Recently Used) list.
+    
+        This list contains the block IDs of blocks that are not currently in
+        active use(those with a reference count of 0 and an unset
+        dirty bit). When a block is accessed from the block device and it exists
+        in the LRU list, its block ID is removed from this list. Additionally,
+        when memory is constrained, blocks from the LRU list may be released or
+        evicted based on their order in the list, starting with the least
+        recently used ones.
         
         Returns:
-            The number of blocks currently in the LRU list.
+            int: The total count of blocks within the LRU list.
         """
-        return len(self.__lru_queue)
+        return self.__lru_count()
+
+    @property
+    def dirty_count(self):
+        """The current number of dirty blocks.
+        
+        Returns:
+            The number of dirty blocks currently in the cache.
+        """
+        return self.__dirty_count()
     
     @property
     def is_full(self) -> bool:
@@ -216,6 +234,9 @@ class BlockCache(object):
             A boolean value: True if the cache is full and cannot store more blocks, False otherwise.
         """
         return self.__blk_limit <= self.count and self.__is_lru_empty()
+    
+    def get_dirty_block(self):
+        pass
     
     def find_get_block(self, blk_id: int) -> Optional['Block']:
         """
@@ -301,6 +322,18 @@ class BlockCache(object):
             # Return None if failed to add the 
             return None
         return block
+    
+    def __dirty_count(self):
+        """
+        The current number of dirty blocks.
+        """
+        return len(self.__dirty_queue)
+        
+    def __cache_count(self):
+        """
+        The current number of blocks stored in the cache.
+        """
+        return len(self.__cache)
         
     def __contains_block(self, block: Block) -> bool:
         """
@@ -328,12 +361,18 @@ class BlockCache(object):
         Add a block id to LRU list. No any validation check will be performed.
         """
         self.__lru_queue.append(blk_id)
-        
+    
+    def __lru_count(self):
+        """
+        The current number of blocks stored in the LRU list.
+        """
+        return len(self.__lru_queue)
+    
     def __is_lru_empty(self) -> bool:
         """
         Check if the LRU list is empty.
         """
-        return len(self.__lru_queue) == 0
+        return self.__lru_count() == 0
     
     def __pop_lru(self) -> Optional['int']:
         """
