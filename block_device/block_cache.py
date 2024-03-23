@@ -270,6 +270,8 @@ class BlockCache(object):
         Decrements the reference count of a given block.
 
         If the block's reference count reaches 0, it is moved to the LRU list.
+        @TODO: Dirty blocks should not be moved lru block. Dirty blocks without
+            refetence should be moved to dirty list.
 
         Args:
             blk: The block to modify.
