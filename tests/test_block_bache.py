@@ -50,21 +50,33 @@ class TestBlock:
         # Ensure decrementing below zero raises an assertion error
         with pytest.raises(AssertionError):
             block.ref_dec()
-         
+        
+    def test_move_block_to_new_cache(self, block):
+        old_cache = block.blk_cache
+        new_cache = BlockCache(4096, 8)
+        new_blk_id = 2
+        block.move_blk_cache(new_cache, new_blk_id)
+        # Verify new cache and ID
+        assert block.blk_id == new_blk_id
+        assert block.blk_cache is new_cache  # This assumes blk_cache is accessible; adjust as needed
+        # Verify bits are reset
+        assert not block.is_dirty
+        assert not block.is_uptodate
+
     @pytest.mark.skip
-    def test_reset_block_id(self, block):
-        def __check_block_valid(block):
-            assert block.ref_count == 0
-            assert not block.is_dirty
-            assert not block.is_uptodate
-        block.set_blk_id(2)
-        __check_block_valid(block)
-        block.ref_inc()
-        assert block.ref_count == 1
-        block.set_blk_id(2)
-        __check_block_valid(block)
-        block.set_blk_id(3)
-        __check_block_valid(block)
+    def test_move_block_with_active_references(self, block):
+        new_blk_cache = BlockCache(4096, 8)
+        with pytest.raises(AssertionError):
+            block.move_blk_cache(new_blk_cache, 2)
+
+    @pytest.mark.skip
+    def test_move_dirty_block(self, block):
+        block.is_dirty = True
+        new_cache = BlockCache(4096, 8)
+        block.move_blk_cache(new_cache, 2)
+        # Verify the block is no longer dirty after moving
+        assert not block.is_dirty
+
 
 @pytest.fixture
 def block_cache() -> BlockCache:
