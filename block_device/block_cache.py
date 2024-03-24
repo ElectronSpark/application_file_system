@@ -110,6 +110,8 @@ class Block(object):
         """
         change block id and the cache it belongs to. This method will also 
         reset the block's dirty bit and uptodate bit.
+        
+        This should not be called by users.
         """
         assert new_blk_id >= 0
         if self.__ref_cnt != 0:
@@ -459,5 +461,6 @@ class BlockCache(object):
         block = self.__cache.pop(blk_id, None)
         if not block is None:
             assert block.blk_id == blk_id, "Find a block with a inconsistent blk_id"
+            block.move_blk_cache(None, blk_id)
         return block
     
