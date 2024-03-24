@@ -241,7 +241,7 @@ class BlockCache(object):
         return self.__blk_limit <= self.count and self.__is_lru_empty()
     
     def get_dirty_block(self) -> Optional['Block']:
-        """@TODO: Get an inactive dirty block.
+        """Get an inactive dirty block.
         
         Attempts to retrieve a dirty cache block with a reference count of 0
         from the dirty queue. The cache block returned will be removed from the
@@ -260,7 +260,7 @@ class BlockCache(object):
         return block
 
     def get_lru_block(self) -> Optional['Block']:
-        """@TODO: Get an inactive block that has been written back.
+        """Get an inactive block that has been written back.
         
         Retrieves a cache block from the tail of the LRU list, indicating it
         has been synchronized with the storage medium and holds no active
@@ -279,7 +279,7 @@ class BlockCache(object):
         return block
 
     def drop_block(self, block: 'Block') -> bool:
-        """@TODO: Drop a block from the cache.
+        """Drop a block from the cache.
         
         Attempts to remove a block from the cache. This method does not delete
         the block instance itself. If the block is currently referenced
@@ -364,7 +364,6 @@ class BlockCache(object):
     
     def alloc_block(self, blk_id: int) -> Optional['Block']:
         """
-        @TODO:
         Allocates and inserts a new block into the cache if there is space 
         available or if an old block can be evicted.
 
@@ -452,19 +451,27 @@ class BlockCache(object):
     Private methods for dirty list
     """
     def __push_dirty(self, blk_id: int):
-        # @TODO:
+        """
+        push a Block ID into dirty list.
+        """
         self.__dirty_queue.append(blk_id)
     
     def __get_dirty(self) -> Optional['int']:
-        # @TODO:
+        """
+        get the first Block ID stored in dirty list.
+        """
         return self.__dirty_queue[0]
     
     def __remove_dirty(self, blk_id: int):
-        # @TODO:
+        """
+        remove a Block ID from dirty list.
+        """
         self.__dirty_queue.remove(blk_id)
         
     def __is_in_dirty(self, blk_id: int) -> bool:
-        #@TODO:
+        """
+        check if a blk_id is stored in dirty list.
+        """
         return blk_id in self.__dirty_queue
     
     def __dirty_count(self):
