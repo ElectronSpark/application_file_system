@@ -31,14 +31,14 @@ class Block(object):
         self.__uptodate = False
         self.__dirty = False
 
-    def __del__(self):
-        """
-        Handles cleanup upon deletion of the cache block, issuing warnings if the block is dirty or still referenced.
-        """
-        if self.__ref_cnt > 0:
-            print(f"Warning: Deleting a cache block with reference count {self.__ref_cnt} > 0.")
-        if self.__dirty:
-            print("Warning: Deleting a dirty cache block which needs to be written back.")
+    # def __del__(self):
+    #     """
+    #     Handles cleanup upon deletion of the cache block, issuing warnings if the block is dirty or still referenced.
+    #     """
+    #     if self.__ref_cnt > 0:
+    #         print(f"Warning: Deleting a cache block with reference count {self.__ref_cnt} > 0.")
+    #     if self.__dirty:
+    #         print("Warning: Deleting a dirty cache block which needs to be written back.")
 
     @property
     def blk_cache(self) -> 'BlockCache':
@@ -167,7 +167,7 @@ class BlockCache(object):
         assert blk_limit > 0, "block limit must be greater than 0"
         
         self.__cache = {}  # Block ID mapped to Block instance.
-        self.__dirty_queue = {} # Block ID mapped to dirty Block.
+        self.__dirty_queue = [] # Block ID mapped to dirty Block.
         self.__lru_queue = []  # List of Block IDs to manage LRU.
         self.__blk_size = blk_size
         self.__blk_limit = blk_limit
@@ -251,7 +251,13 @@ class BlockCache(object):
             Optional[Block]: A cache block instance if available in the dirty
             queue; otherwise, None.
         """
-        pass
+        if self.__is_dirty_empty():
+            return None
+        
+        blk_id = self.__get_dirty()
+        block = self.find_get_block(blk_id)
+        assert isinstance(block, Block), "Failed to get a block in dirty list from cache"
+        return block
 
     def get_lru_block(self) -> Optional['Block']:
         """@TODO: Get an inactive block that has been written back.
@@ -264,7 +270,13 @@ class BlockCache(object):
             Optional[Block]: A cache block instance if the LRU list is not
             empty; otherwise, None.
         """
-        pass
+        if self.__is_lru_empty():
+            return None
+        
+        blk_id = self.__get_lru()
+        block = self.find_get_block(blk_id)
+        assert isinstance(block, Block), "Failed to get a block in lru list from cache"
+        return block
 
     def drop_block(self, block: 'Block') -> bool:
         """@TODO: Drop a block from the cache.
@@ -280,8 +292,18 @@ class BlockCache(object):
         Returns:
             bool: True if the block was successfully removed; False otherwise.
         """
-        pass
-    
+        if not self.__contains_block(block):
+            # Can not drop a block from a block cache where it doesn't beong to
+            return False
+        
+        if block.ref_count > 1:
+            return False
+        
+        popped_block = self.__pop_block(block.blk_id)
+        assert popped_block is block
+        
+        return True
+            
     def find_get_block(self, blk_id: int) -> Optional['Block']:
         """Attempts to find and return a block by its ID from the cache or the
         LRU list.
@@ -298,9 +320,14 @@ class BlockCache(object):
         """
         block = self.__get_block(blk_id)
         if block is not None:
+            assert block.blk_id == blk_id
             if block.ref_count == 0:
-                assert self.__is_in_lru(blk_id)
-                self.__remove_lru_blk_id(block.blk_id)
+                if block.is_dirty:
+                    assert self.__is_in_dirty(blk_id)
+                    self.__remove_dirty(blk_id)
+                else:
+                    assert self.__is_in_lru(blk_id)
+                    self.__remove_lru(blk_id)
             block.ref_inc()
         return block
 
@@ -313,9 +340,6 @@ class BlockCache(object):
         added to the dirty list, whereas synchronized blocks without
         references are added to the LRU list.
         
-        @TODO: Ensure dirty blocks are not moved to the LRU list. Dirty blocks
-            without references should be moved to the dirty list.
-        
         Args:
             blk: The block to modify.
         """
@@ -327,7 +351,12 @@ class BlockCache(object):
             if blk.is_uptodate:
                 # When the block is up to date, it is added to the LRU list for 
                 # potential future use.
-                self.__push_lru(blk.blk_id)
+                if blk.is_dirty:
+                    # Dirty blocks without reference is added to dirty list.
+                    # Blocks in dirty list need to be written-back.
+                    self.__push_dirty(blk.blk_id)
+                else:
+                    self.__push_lru(blk.blk_id)
             else:
                 # Release blocks that are not up to date.
                 popped_block = self.__pop_block(blk.blk_id)
@@ -335,6 +364,7 @@ class BlockCache(object):
     
     def alloc_block(self, blk_id: int) -> Optional['Block']:
         """
+        @TODO:
         Allocates and inserts a new block into the cache if there is space 
         available or if an old block can be evicted.
 
@@ -347,11 +377,12 @@ class BlockCache(object):
         assert isinstance(blk_id, int)
         assert blk_id >= 0
         
-        if self.is_full:
-            return None
-        
-        if not self.__is_lru_empty():
-            popped_blk_id = self.__pop_lru()
+        if self.__cache_count() >= self.__blk_limit:
+            if self.__is_lru_empty():
+                return None
+            
+            popped_blk_id = self.__get_lru()
+            self.__remove_lru(popped_blk_id)
             if popped_blk_id == blk_id:
                 block = self.__get_block(popped_blk_id)
                 assert isinstance(block, Block)
@@ -375,12 +406,94 @@ class BlockCache(object):
             return None
         return block
     
+    
+    """
+    Private methods for LRU list
+    """
+    def __remove_lru(self, blk_id: int):
+        """
+        Remove a block id from LRU list. No any validation check will be performed.
+        """
+        self.__lru_queue.remove(blk_id)
+        
+    def __is_in_lru(self, blk_id: int) -> bool:
+        """
+        Check if a block id is in LRU list.
+        """
+        return blk_id in self.__lru_queue
+    
+    def __push_lru(self, blk_id: int):
+        """
+        Add a block id to LRU list. No any validation check will be performed.
+        """
+        self.__lru_queue.append(blk_id)
+    
+    def __get_lru(self) -> Optional['int']:
+        """
+        Get a block id at the end of LRU list. No any validation check will be
+        performed.
+        """
+        return self.__lru_queue[0]
+    
+    def __lru_count(self):
+        """
+        The current number of blocks stored in the LRU list.
+        """
+        return len(self.__lru_queue)
+    
+    def __is_lru_empty(self) -> bool:
+        """
+        Check if the LRU list is empty.
+        """
+        return self.__lru_count() == 0
+    
+    
+    """
+    Private methods for dirty list
+    """
+    def __push_dirty(self, blk_id: int):
+        # @TODO:
+        self.__dirty_queue.append(blk_id)
+    
+    def __get_dirty(self) -> Optional['int']:
+        # @TODO:
+        return self.__dirty_queue[0]
+    
+    def __remove_dirty(self, blk_id: int):
+        # @TODO:
+        self.__dirty_queue.remove(blk_id)
+        
+    def __is_in_dirty(self, blk_id: int) -> bool:
+        #@TODO:
+        return blk_id in self.__dirty_queue
+    
     def __dirty_count(self):
         """
         The current number of dirty blocks.
         """
         return len(self.__dirty_queue)
+
+    def __is_dirty_empty(self):
+        """
+        Check if the dirty list is empty.
+        """
+        return self.__dirty_count() == 0
         
+    
+    """
+    Private methods for cache
+    """
+    def __add_block(self, block: 'Block') -> bool:
+        """
+        Add a block to the block cache. Return True if succeed.
+        """
+        if not block.blk_cache is self:
+            return False
+        if block.blk_id in self.__cache:
+            return False
+        self.__cache[block.blk_id] = block
+        return True
+    
     def __cache_count(self):
         """
         The current number of blocks stored in the cache.
@@ -395,54 +508,6 @@ class BlockCache(object):
             return False
         # The following are thorough checks, may be descarded in the future.
         return block.blk_id in self.__cache
-    
-    def __remove_lru_blk_id(self, blk_id: int):
-        """
-        Remove a block id from LRU list. No any validation check will be performed.
-        """
-        self.__lru_queue.remove(blk_id)
-        
-    def __is_in_lru(self, blk_id: int) -> bool:
-        """
-        Check if a block id is in LRU list.
-        """
-        return blk_id in self.__lru_queue
-    
-    def __push_lru(self, blk_id: int) -> bool:
-        """
-        Add a block id to LRU list. No any validation check will be performed.
-        """
-        self.__lru_queue.append(blk_id)
-    
-    def __lru_count(self):
-        """
-        The current number of blocks stored in the LRU list.
-        """
-        return len(self.__lru_queue)
-    
-    def __is_lru_empty(self) -> bool:
-        """
-        Check if the LRU list is empty.
-        """
-        return self.__lru_count() == 0
-    
-    def __pop_lru(self) -> Optional['int']:
-        """
-        Get and remove a block id at the end of LRU list. 
-        No any validation check will be performed.
-        """
-        return self.__lru_queue.pop(0)
-    
-    def __add_block(self, block: 'Block') -> bool:
-        """
-        Add a block to the block cache. Return True if succeed.
-        """
-        if not block.blk_cache is self:
-            return False
-        if block.blk_id in self.__cache:
-            return False
-        self.__cache[block.blk_id] = block
-        return True
     
     def __get_block(self, blk_id: int) -> Optional['Block']:
         """

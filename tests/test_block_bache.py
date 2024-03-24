@@ -1,4 +1,5 @@
 import pytest
+from typing import Optional
 from block_device.block_cache import Block, BlockCache  # Adjust according to your project structure
 
 class TestBlock:
@@ -78,14 +79,15 @@ class TestBlock:
         assert not block.is_dirty
 
 
-@pytest.fixture
-def block_cache() -> BlockCache:
-    """Fixture that provides a BlockCache instance with predefined settings."""
-    blk_size = 1024  # Example block size
-    blk_limit = 5  # Example limit of blocks in cache
-    return BlockCache(blk_size, blk_limit)
 
 class TestBlockCache:
+    @pytest.fixture
+    def block_cache(self) -> BlockCache:
+        """Fixture that provides a BlockCache instance with predefined settings."""
+        self.blk_size = 1024  # Example block size
+        self.blk_limit = 5  # Example limit of blocks in cache
+        return BlockCache(self.blk_size, self.blk_limit)
+
     def test_alloc_block_success(self, block_cache: BlockCache):
         """Tests successful allocation of a new block in the cache."""
         blk_id = 1
@@ -170,31 +172,76 @@ class TestBlockCache:
         assert block.ref_count == 1
         assert block is allocated_blocks[4]
         assert block_cache.is_full
-
-    @pytest.mark.skip
-    def test_least_used_block(self, block_cache: BlockCache):
-        """Tests retrieving the least used block from the cache."""
-        # Populate cache with some blocks and simulate usage
-        allocated_blocks = []
-        for blk_id in range(1, 4):
-            block = block_cache.alloc_block(blk_id)
-            assert isinstance(block, Block)
-            allocated_blocks.append(block)
-            block_cache.put_block(block)
         
-        least_used_block = block_cache.least_used_block()
-        # Assuming the first block is the least used
-        assert least_used_block is not None
-        assert least_used_block.blk_id == 1  
+    def test_add_block_success(self, block_cache: BlockCache):
+        block = Block(block_cache, 1, self.blk_size)
+        assert block_cache._BlockCache__add_block(block) is True
+        assert block.blk_id in block_cache._BlockCache__cache
+        
+    def test_add_block_failure_due_to_duplicate_id(self, block_cache: BlockCache):
+        block1 = Block(block_cache, 1, self.blk_size)
+        block2 = Block(block_cache, 1, self.blk_size)
+        assert block_cache._BlockCache__add_block(block1) is True
+        assert block_cache._BlockCache__add_block(block2) is False
 
-    @pytest.mark.skip
-    def test_drop_block(self, block_cache: BlockCache):
-        """Tests dropping a block from the cache."""
-        blk_id = 1
-        block = block_cache.alloc_block(blk_id)  # Add a block to the cache
+    def test_get_block_hits(self, block_cache: BlockCache):
+        block_id = 1
+        block = block_cache.alloc_block(block_id)
+        assert isinstance(block, Block)
+        block.set_uptodate()
         block_cache.put_block(block)
-        block = block_cache.find_get_block(blk_id)  # Retrieve the added block
-        result = block_cache.drop_block(block)
-        assert result is True
-        assert blk_id not in block_cache._BlockCache__cache
+        retrieved_block = block_cache.find_get_block(block_id)
+        assert retrieved_block is not None
+        assert retrieved_block.blk_id == block_id
 
+    def test_get_block_misses(self, block_cache: BlockCache):
+        block_id = 1
+        retrieved_block = block_cache.find_get_block(block_id)
+        assert retrieved_block is None
+
+    def test_lru_block_management(self, block_cache: BlockCache):
+        block_id = 1
+        block = block_cache.alloc_block(block_id)
+        assert isinstance(block, Block)
+        block.set_uptodate()
+        block_cache.put_block(block)  # Assuming this puts the block in LRU
+        assert block_cache.lru_count == 1
+
+    def test_dirty_block_management(self, block_cache: BlockCache):
+        block_id = 1
+        block = block_cache.alloc_block(block_id)
+        assert isinstance(block, Block)
+        block.set_uptodate()
+        block.set_dirty()
+        block_cache.put_block(block)  # Assuming this puts the block in the dirty queue
+        assert block_id in block_cache._BlockCache__dirty_queue
+
+    def test_drop_block_success(self, block_cache: BlockCache):
+        block = Block(block_cache, 1, self.blk_size)
+        block_cache._BlockCache__add_block(block)
+        assert block_cache.drop_block(block) is True
+        assert block.blk_id not in block_cache._BlockCache__cache
+
+    def test_cache_full_condition(self, block_cache: BlockCache):
+        for i in range(1, self.blk_limit + 2):
+            block_cache.alloc_block(i)
+        assert block_cache.is_full is True
+
+    def test_get_lru_block(self, block_cache: BlockCache):
+        block = block_cache.alloc_block(1)
+        assert not block is None
+        block.set_uptodate()
+        block_cache.put_block(block)
+        lru_block = block_cache.get_lru_block()  # This should remove the block from LRU queue
+        assert lru_block is not None
+        assert block_cache.lru_count == 0
+
+    def test_get_dirty_block(self, block_cache: BlockCache):
+        block = block_cache.alloc_block(1)
+        assert not block is None
+        block.set_uptodate()
+        block.set_dirty()
+        block_cache.put_block(block)
+        dirty_block = block_cache.get_dirty_block()  # This should remove the block from dirty queue
+        assert dirty_block is not None
+        assert block_cache.dirty_count == 0
