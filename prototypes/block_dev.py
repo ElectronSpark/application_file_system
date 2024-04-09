@@ -1,5 +1,6 @@
 from abc import ABC
 from abc import abstractmethod
+from typing import Optional
 
 
 class BlockDevice(ABC):
@@ -7,26 +8,30 @@ class BlockDevice(ABC):
         pass
     
     @abstractmethod
-    def open(self):
+    def open(self) -> bool:
         pass
     
     @abstractmethod
-    def close(self):
+    def close(self) -> bool:
         pass
     
     @abstractmethod
-    def block_read(self, blk_id, blk_cnt):
+    def block_read(self, blk_id: int, blk_cnt: int) -> Optional['bytearray']:
         pass
     
     @abstractmethod
-    def block_write(self, blk_id, blk_cnt):
+    def block_write(self, blk_id: int, blk_cnt: int, buf: bytes) -> int:
         pass
     
     @abstractmethod
-    def lock(self):
+    def flush(self) -> bool:
         pass
     
     @abstractmethod
-    def unlock(self):
+    def lock(self) -> bool:
+        pass
+    
+    @abstractmethod
+    def unlock(self) -> None:
         pass
     
