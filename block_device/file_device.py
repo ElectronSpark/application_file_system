@@ -1,12 +1,11 @@
 from ..prototypes.block_dev import BlockDevice
-from block_cache import BlockCache
 from threading import Lock
-from typing import Optional
+from typing import Optional, IO
 import os
 
 
 class FileDevice(BlockDevice):
-    def __init__(self, dev_path: str, block_size: int=4096, cache_size: int=16):
+    def __init__(self, dev_path: str, block_size: int=4096):
         """
     Initializes a new FileDevice instance, representing a file-based block device.
     
@@ -19,7 +18,6 @@ class FileDevice(BlockDevice):
         dev_path (str): The file system path to the device file. If the file does not exist, it will
                         be created when the device is opened.
         block_size (int): The size of each block in bytes. Defaults to 4096. Must be at least 512 bytes.
-        cache_size (int): The number of blocks that the cache can hold. Defaults to 16. Must be greater than 4.
 
     Raises:
         AssertionError: If the provided block size is less than 512 bytes or if the cache size is not
@@ -27,18 +25,16 @@ class FileDevice(BlockDevice):
 
     The constructor asserts the validity of the provided block and cache sizes to ensure they meet
     minimum requirements. It initializes internal attributes including the device path, block size,
-    cache size, and a lock for thread-safe operations. The block cache and file descriptor are initialized
+    and a lock for thread-safe operations. The block cache and file descriptor are initialized
     as None and will be set when the device is opened.
     """
         assert block_size >= 512, "The minimun size for a file block device is 512 Bytes."
-        assert cache_size > 4, "The minumum cache size is 16 blocks."
         
         super().__init__()
         
-        self.__block_size = block_size
-        self.__cache_size = cache_size
+        self.__block_size = block_size  # Size of each block in bytes
+        self.__blk_cnt = None   # Total number of blocks in the device
         self.__dev_path = dev_path
-        self.__block_cache = None
         self.__fd = None
         self.__dev_lock = Lock()
         
@@ -65,23 +61,19 @@ class FileDevice(BlockDevice):
         If the file block device is already closed, this method will not
         perform any action.
         
-        @TODO: Flush the device before closing.
-        
         Returns:
             bool: True if successfully closed.
         """
         if not self.__is_open():
             return True
         
-        return self.__do_close()
+        flush_ret = self.flush()
+        close_ret = self.__do_close()
+        
+        return flush_ret and close_ret
     
     def block_read(self, blk_id: int, blk_cnt: int) -> Optional['bytearray']:
-        """Reads blocks from the device.
-        
-        Attempts to retrieve blocks from the Block Cache first. If the blocks 
-        are found in the Block Cache and are up to date, it reads the data 
-        from the cache. If not found in the Block Cache, it reads from the 
-        device file and stores the blocks in the Block Cache.
+        """Reads blocks from the device file.
         
         Args:
             blk_id (int): The block ID of the first block to read.
@@ -91,14 +83,25 @@ class FileDevice(BlockDevice):
             Optional[bytearray]: The content of the blocks read if successful;
             otherwise, None.
         """
-        pass
+        if not self.__is_open():
+            return None
+        
+        offset_bytes = self.__calc_block_bytes(blk_id)
+        read_size = self.__calc_block_bytes(blk_cnt)
+        if offset_bytes < 0 or read_size < 0:
+            return None
+        
+        if blk_cnt + blk_cnt > self.__blk_cnt:
+            # Out of range
+            return None
+        
+        # seek to the place to write
+        self.__fd.seek(offset_bytes)
+        
+        return self.__fd.read(read_size)
     
     def block_write(self, blk_id: int, blk_cnt: int, buf: bytes) -> int:
-        """Writes blocks to the device.
-        
-        Writes blocks from the given buffer to the device's Block Cache first.
-        To persist changes, the device must be flushed to ensure all changes
-        are written back.
+        """Writes blocks to the device file.
         
         Args:
             blk_id (int): The block ID of the first block to write.
@@ -106,9 +109,32 @@ class FileDevice(BlockDevice):
             buf (bytes): The buffer storing data to write.
         
         Returns:
-            int: The actual number of blocks written.
+            int: The actual number of blocks written. -1 if failed.
         """
-        pass
+        if not self.__is_open():
+            return -1
+        
+        offset_bytes = self.__calc_block_bytes(blk_id)
+        write_size = self.__calc_block_bytes(blk_cnt)
+        if offset_bytes < 0 or write_size < 0:
+            return -1
+        
+        if blk_cnt + blk_cnt > self.__blk_cnt:
+            # Out of range
+            return -1
+        
+        # seek to the place to write
+        self.__fd.seek(offset_bytes)
+        
+        # do write operation
+        if write_size <= len(buf):
+            wt_size = self.__fd.write(buf[:write_size])
+            return wt_size // self.__block_size
+        else:
+            z_padding_size = write_size - len(buf)
+            wt_size = self.__fd.write(buf)
+            pd_size = self.__fd.write(bytearray([0])*z_padding_size)
+            return (wt_size + pd_size) // self.__block_size
     
     def flush(self) -> bool:
         """Flushes the device's Block Cache.
@@ -118,7 +144,11 @@ class FileDevice(BlockDevice):
         Returns:
             bool: True if successful.
         """
-        pass
+        if self.__is_open():
+            self.__fd.flush()
+            return True
+        else:
+            return False
     
     def lock(self) -> bool:
         """Acquires the device lock.
@@ -146,30 +176,26 @@ class FileDevice(BlockDevice):
     def __do_open(self) -> bool:
         """Performs the actual device opening process.
         
-        Creates the Block Cache to reduce IO traffic and attempts to open or
-        create the device file.
+        Attempts to open the device file.
         
         Returns:
             bool: True if successful.
         """
         
-        # Create Block Cache to reduce IO traffic
-        block_cache  = BlockCache(blk_size=self.__block_size, blk_limit=self.__cache_size)
-        
         # Open or create the device's file.
         try:
-            if not os.path.exists(self.__dev_path):
-                open_text_mode = "xb+"
-            else:
-                open_text_mode = "rb+"
-            fd = open(self.__dev_path, open_text_mode)
+            fd = open(self.__dev_path, "rb+")
             
         except OSError:
-            del block_cache
             return False
-            
+        
+        blk_cnt = self.__get_blk_cnt(fd)
+        if blk_cnt is None:
+            fd.close()
+            return False    
+        
         self.__fd = fd
-        self.__block_cache = block_cache
+        self.__blk_cnt = blk_cnt
         return True
         
     def __do_close(self) -> bool:
@@ -184,7 +210,45 @@ class FileDevice(BlockDevice):
         self.__fd = None
         fd.close()
         
-        del self.__block_cache
-        self.__block_cache = None
         return True
         
+    def __calc_block_bytes(self, blk_id: int) -> int:
+        """Calculate the offset in bytes for the file device
+
+        Args:
+            blk_id (int): The Block ID
+
+        Returns:
+            int: offset in bytes if block id is within the range of the device,
+                -1 if failed.
+        """
+        if not isinstance(self.__blk_cnt, int):
+            # Cannot get the number of blocks in the device, because the device
+            # file is not properly opened.
+            return -1
+        
+        if blk_id < 0 or self.__blk_cnt <= blk_id:
+            # The given block id is out of range.
+            return -1
+        
+        return self.__block_size * blk_id
+    
+    def __get_blk_cnt(self, fd: IO['any']) -> Optional['int']:
+        """Get the total number of blocks in the given device file
+        
+        Args:
+            fd: The opened device file
+            
+        Returns:
+            Optional['int']: The total number of blocks if success.
+                None if failed.
+        """
+        if not fd.seekable():
+            return None
+        
+        fd.seek(0, os.SEEK_END)
+        file_size = fd.tell()
+        if file_size < self.__block_size:
+            return None
+        
+        return file_size // self.__block_size
